@@ -5,7 +5,9 @@ Across these experiments, we generated stimuli that were carefully controlled on
 
 <img width="468" alt="image" src="https://github.com/steveSchwering/dative_memory/assets/30991528/ce440e2d-b66a-43ee-acfc-302a2efe29b7">
 
-Generation of stimuli for each experiment can be found in each experiment's folder under the subfolder `stimulus_generation`. Analysis of each experiment's data can be found in each experiment's `analysis` subfolder. The results were pretty interesting, as shown below!
+Generation of stimuli for each experiment can be found in each experiment's folder under the subfolder `stimulus_generation`. Analysis of each experiment's data can be found in each experiment's `analysis` subfolder. Note, in `stimulus_generation`, references are made to (Brysbaert norms)[https://link.springer.com/article/10.3758/BRM.41.4.977], which have not been copied to this repository. Also, raw data for analyses is not included and can instead be found on [this](https://osf.io/6gtnk/) OSF repository.
+
+The results were pretty interesting, as shown below!
 
 Experiment 1: Manipulations of part-of-speech
 
