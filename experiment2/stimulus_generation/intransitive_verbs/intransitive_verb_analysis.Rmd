@@ -1,0 +1,24 @@
+---
+title: "intransitive_verb_analysis"
+author: "Steve Schwering"
+date: "3/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+norm_file = 'brysbaert_norms.txt'
+
+norms = read_tsv(norm_file)
+```
+
+## Verbs
+
+```{r}
+intransitive_verbs = norms %>%
+  filter(Dom_PoS_SUBTLEX == 'Verb',
+         FREQcount > 100)
+```

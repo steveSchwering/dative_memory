@@ -1,0 +1,31 @@
+---
+title: "adjectives_brysbaert"
+author: "Steve Schwering"
+date: "1/29/2021"
+output: html_document
+---
+
+```{r}
+d = read_tsv(file = 'brysbaert_norms.txt') %>%
+  rename("word" = Word)
+```
+
+Identify adjectives
+
+```{r}
+num_adjectives = 52 * 2
+
+adjectives = d %>%
+  filter(Dom_PoS_SUBTLEX == 'Adjective') %>%
+  arrange(desc(FREQcount)) %>%
+  arrange(desc(Percentage_dom_PoS)) %>%
+  slice(1:num_adjectives)
+```
+
+Save adjectives
+
+```{r}
+adjectives %>%
+  select(c(word, FREQcount, Lg10WF, CDcount, Lg10CD, Dom_PoS_SUBTLEX, Percentage_dom_PoS)) %>%
+  write_csv('adjectives.csv')
+```

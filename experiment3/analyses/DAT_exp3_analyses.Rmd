@@ -1,0 +1,1020 @@
+---
+title: "DAT -- Experiment 3"
+author: "Steve Schwering"
+date: "11/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing packages and loading packages
+
+```{r}
+#install.packages('tidyverse')
+#install.packages('stringdist')
+#install.packages('jsonlite')
+#install.packages('fs')
+#install.packages('sjstats')
+```
+
+```{r}
+library(tidyverse)
+library(stringdist)
+library(sjstats)
+```
+
+## Reading in participant data and pre-processing
+
+```{r, results = 'hide', message = FALSE}
+data_dir = paste(getwd(), "/data/", sep = "")
+data_files = fs::dir_ls(path = data_dir, recurse = TRUE, glob = "*.json")
+
+raw_data = data_files %>%
+  map(~jsonlite::read_json(., simplifyVector = TRUE)) %>%
+  bind_rows(., .id = "filename")
+```
+
+Looking at participant times on different sections
+
+```{r}
+instructions = raw_data %>%
+  filter(trial_type == 'instructions') %>%
+  mutate(rt = rt / 1000) %>%
+  group_by(filename) %>%
+  summarise(rt = sum(rt) / 60)
+
+recall = raw_data %>%
+  filter(trial_type == 'survey-text-autooff') %>%
+  mutate(rt = rt / 1000) %>%
+  group_by(filename) %>%
+  summarise(rt = sum(rt) / 60)
+```
+
+```{r,  results = 'hide', message = FALSE}
+cleaned_data = raw_data %>%
+  select(-c("filename", "view_history", "trial_index", "internal_node_id", "stimulus", "key_press")) %>%
+  filter(trial_type == 'survey-text-autooff',
+         frame_condition != 'None') %>%
+  mutate(participant_id = as.numeric(participant_id),
+         block_num = as.numeric(block_num),
+         trial_num = as.numeric(trial_num),
+         study_position = as.numeric(study_position))
+```
+
+## Demographics data
+
+```{r}
+demographics = read_csv(file = 'DAT_exp3_demographics_cleaned.csv') %>%
+  dplyr::arrange(desc(row_number())) %>%
+  filter(participant_id %in% cleaned_data$participant_id) %>%
+  distinct(participant_id, .keep_all = TRUE)
+
+length(unique(demographics$participant_id))
+```
+
+## Reading in participant trial information
+
+```{r, results = 'hide', message = FALSE}
+trial_info_dir = paste(getwd(), "/participants_trial_info", sep = "")
+trial_info_files = fs::dir_ls(path = trial_info_dir, recurse = TRUE, glob = "*.tsv")
+
+trial_info = trial_info_files %>%
+  map(~read_tsv(.)) %>%
+  lapply(., mutate_if, is.numeric, as.character) %>% # Getting some error
+  bind_rows(., .id = "filename")
+```
+
+```{r, message = FALSE}
+cleaned_trial_info = trial_info %>%
+  select(c(participant_id, block_num, trial_num, study_position, list_condition)) %>%
+  mutate(participant_id = as.numeric(participant_id),
+         block_num = as.numeric(block_num),
+         trial_num = as.numeric(trial_num),
+         study_position = as.numeric(study_position))
+```
+
+## Merging dataframes
+
+```{r, message = FALSE}
+merged = cleaned_data %>%
+  left_join(cleaned_trial_info, by = c("participant_id", "block_num", "trial_num", "study_position")) %>%
+  mutate(study_position = study_position + 1) %>%
+  rename(recall_position = "study_position", target_word = "study_word")
+```
+
+```{r, echo = FALSE}
+rm(cleaned_data); rm(cleaned_trial_info); rm(trial_info)
+rm(data_files); rm(trial_info_dir); rm(trial_info_files)
+rm(data_dir); rm(norms_dir); rm(trans_dir)
+```
+
+## Checking counts of conditions
+
+Just for my sanity
+
+```{r, message = FALSE}
+# We should have roughly an equal number of observations for each condition
+# Note they will not be exactly equal because we have an odd number of lists per participant
+merged %>%
+  group_by() %>%
+  count(list_condition)
+
+# Frame condition is randomly assigned by Qualtrics
+merged %>%
+  count(frame_condition)
+
+# There should be no systematic relationship between conditions
+merged %>%
+  group_by(frame_condition) %>%
+  count(list_condition)
+
+# Are there patterns between specific lists and their condition?
+merged %>%
+  group_by(study_list) %>%
+  count(list_condition) %>%
+  arrange(n)
+
+merged %>%
+  group_by(study_list) %>%
+  count(list_condition) %>%
+  arrange(desc(n))
+```
+
+## How did participants respond to the debriefing questions?
+
+```{r, message = FALSE}
+debriefing_q = raw_data %>%
+  filter(trial_type == 'survey-text') %>%
+  select(c('participant_id', 'responses')) %>%
+  mutate(participant_id = as.numeric(participant_id)) %>%
+  mutate(q_responses = str_extract_all(responses, '(?<=:\\")[a-zA-Z ]+')) %>%
+  unnest_wider(q_responses)
+```
+
+Did participants report any specific strategies?
+
+```{r}
+debriefing_q %>%
+  select(c('participant_id', '...1')) %>%
+  sample_n(size = 9)
+```
+
+What patterns did participants notice?
+
+```{r}
+debriefing_q %>%
+  select(c('participant_id', '...2')) %>%
+  sample_n(size = 9)
+```
+
+What did participants think the hypotheses were?
+
+```{r}
+debriefing_q %>%
+  select(c('participant_id', '...3')) %>%
+  sample_n(size = 9)
+```
+
+Any technical difficulties?
+
+```{r}
+debriefing_q %>%
+  select(c('participant_id', '...4')) %>%
+  sample_n(size = 9)
+```
+
+Honest effort to complete the task?
+
+```{r}
+debriefing_q %>%
+  select(c('participant_id', '...5')) %>%
+  sample_n(size = 9)
+```
+
+```{r}
+rm(raw_data)
+```
+
+## Demographics data analysis
+
+Age of participants
+
+```{r}
+demographics %>%
+  summarise(m_age = mean(as.numeric(age), na.rm = TRUE),
+            sd_age = sd(as.numeric(age), na.rm = TRUE))
+```
+
+Gender
+
+```{r}
+count(demographics$gender)
+```
+
+## Analysis -- scoring data
+
+Here we want to code the recalled word by their similarity with the studied words across list positions. We also want to score the data to track item and order errors as they are classically defined in the memory literature.
+
+### Fuzzy string matching
+
+```{r, results = 'hide', message = FALSE}
+d = merged %>%
+  # Extract participant responses from the string
+  mutate(response_word = str_extract_all(responses, ':\\".*?\\"'),
+         response_word = str_replace_all(response_word,  "[^[A-Za-z]]", ""),
+         study_list_c = str_extract_all(study_list, '[A-Za-z]+'))
+
+d = d %>%
+  # Extract all response words, group and nest them, then unnest
+  group_by(participant_id, frame_condition, trial_num) %>%
+  summarize(response_list = list(unique(response_word))) %>%
+  left_join(d) %>%
+  unnest_wider(response_list) %>%
+  rename("response_list_word_1" = "...1",
+         "response_list_word_2" = "...2",
+         "response_list_word_3" = "...3",
+         "response_list_word_4" = "...4",
+         "response_list_word_5" = "...5",
+         "response_list_word_6" = "...6") %>%
+  # Unnest studied words
+  unnest_wider(study_list_c) %>%
+  rename("study_list_word_1" = "...1",
+         "study_list_word_2" = "...2",
+         "study_list_word_3" = "...3",
+         "study_list_word_4" = "...4",
+         "study_list_word_5" = "...5",
+         "study_list_word_6" = "...6") %>%
+  # Generate fuzzy matching scoring with target position
+  mutate(dist_target = ifelse(nchar(target_word) > nchar(response_word),
+                       1 - (stringdist(target_word, response_word) / nchar(target_word)),
+                       1 - (stringdist(target_word, response_word) / nchar(response_word))),
+         dist_target = ifelse(is.na(dist_target), 0, dist_target)) %>%
+  # Word 1
+  mutate(dist_word_1 = ifelse(nchar(study_list_word_1) > nchar(response_word),
+                       1 - (stringdist(study_list_word_1, response_word) / nchar(study_list_word_1)),
+                       1 - (stringdist(study_list_word_1, response_word) / nchar(response_word))),
+         dist_word_1 = ifelse(is.na(dist_word_1), 0, dist_word_1)) %>%
+  # Word 2
+  mutate(dist_word_2 = ifelse(nchar(study_list_word_2) > nchar(response_word),
+                       1 - (stringdist(study_list_word_2, response_word) / nchar(study_list_word_2)),
+                       1 - (stringdist(study_list_word_2, response_word) / nchar(response_word))),
+         dist_word_2 = ifelse(is.na(dist_word_2), 0, dist_word_2)) %>%
+  # Word 3
+  mutate(dist_word_3 = ifelse(nchar(study_list_word_3) > nchar(response_word),
+                       1 - (stringdist(study_list_word_3, response_word) / nchar(study_list_word_3)),
+                       1 - (stringdist(study_list_word_3, response_word) / nchar(response_word))),
+         dist_word_3 = ifelse(is.na(dist_word_3), 0, dist_word_3)) %>%
+  # Word 4
+  mutate(dist_word_4 = ifelse(nchar(study_list_word_4) > nchar(response_word),
+                       1 - (stringdist(study_list_word_4, response_word) / nchar(study_list_word_4)),
+                       1 - (stringdist(study_list_word_4, response_word) / nchar(response_word))),
+         dist_word_4 = ifelse(is.na(dist_word_4), 0, dist_word_4)) %>%
+  # Word 5
+  mutate(dist_word_5 = ifelse(nchar(study_list_word_5) > nchar(response_word),
+                       1 - (stringdist(study_list_word_5, response_word) / nchar(study_list_word_5)),
+                       1 - (stringdist(study_list_word_5, response_word) / nchar(response_word))),
+         dist_word_5 = ifelse(is.na(dist_word_5), 0, dist_word_5)) %>%
+  # Word 6
+  mutate(dist_word_6 = ifelse(nchar(study_list_word_6) > nchar(response_word),
+                       1 - (stringdist(study_list_word_6, response_word) / nchar(study_list_word_6)),
+                       1 - (stringdist(study_list_word_6, response_word) / nchar(response_word))),
+         dist_word_6 = ifelse(is.na(dist_word_6), 0, dist_word_6))
+```
+
+### Exact match and item/order errors
+
+```{r,  results = 'hide', message = FALSE}
+d = d %>%
+  # Exact match with studied word in target position and all positions
+  mutate(correct_strict = ifelse(target_word == response_word, 1, 0),
+         correct_strict = ifelse(is.na(correct_strict), 0, correct_strict),
+         correct_word_1 = ifelse(study_list_word_1 == response_word, 1, 0),
+         correct_word_1 = ifelse(is.na(correct_word_1), 0, correct_word_1),
+         correct_word_2 = ifelse(study_list_word_2 == response_word, 1, 0),
+         correct_word_2 = ifelse(is.na(correct_word_2), 0, correct_word_2),
+         correct_word_3 = ifelse(study_list_word_3 == response_word, 1, 0),
+         correct_word_3 = ifelse(is.na(correct_word_3), 0, correct_word_3),
+         correct_word_4 = ifelse(study_list_word_4 == response_word, 1, 0),
+         correct_word_4 = ifelse(is.na(correct_word_4), 0, correct_word_4),
+         correct_word_5 = ifelse(study_list_word_5 == response_word, 1, 0),
+         correct_word_5 = ifelse(is.na(correct_word_5), 0, correct_word_5),
+         correct_word_6 = ifelse(study_list_word_6 == response_word, 1, 0),
+         correct_word_6 = ifelse(is.na(correct_word_6), 0, correct_word_6)) %>%
+  mutate(correct_lenient = ifelse(
+           (correct_word_1 == 1) |
+           (correct_word_2 == 1) |
+           (correct_word_3 == 1) |
+           (correct_word_4 == 1) |
+           (correct_word_5 == 1) |
+           (correct_word_6 == 1), 1, 0)) %>%
+  # Item errors and order errors
+  mutate(order_error = ifelse((correct_word_1 | correct_word_2 | correct_word_3 | 
+                                correct_word_4 | correct_word_5 | correct_word_6) &
+                                !correct_strict, 1, 0),
+         item_error = ifelse(!correct_word_1 & !correct_word_2 & !correct_word_3 & 
+                               !correct_word_4 & !correct_word_5 & !correct_word_6, 1, 0))
+```
+
+```{r}
+d = d %>%
+  mutate(correct_word_1_studied = ifelse(response_list_word_1 == target_word, 1, 0),
+         correct_word_1_studied = ifelse(is.na(correct_word_1_studied), 0, correct_word_1_studied),
+         correct_word_2_studied = ifelse(response_list_word_2 == target_word, 1, 0),
+         correct_word_2_studied = ifelse(is.na(correct_word_2_studied), 0, correct_word_2_studied),
+         correct_word_3_studied = ifelse(response_list_word_3 == target_word, 1, 0),
+         correct_word_3_studied = ifelse(is.na(correct_word_3_studied), 0, correct_word_3_studied),
+         correct_word_4_studied = ifelse(response_list_word_4 == target_word, 1, 0),
+         correct_word_4_studied = ifelse(is.na(correct_word_4_studied), 0, correct_word_4_studied),
+         correct_word_5_studied = ifelse(response_list_word_5 == target_word, 1, 0),
+         correct_word_5_studied = ifelse(is.na(correct_word_5_studied), 0, correct_word_5_studied),
+         correct_word_6_studied = ifelse(response_list_word_6 == target_word, 1, 0),
+         correct_word_6_studied = ifelse(is.na(correct_word_6_studied), 0, correct_word_6_studied)) %>%
+  mutate(correct_lenient_studied = ifelse(
+           (correct_word_1_studied == 1) |
+           (correct_word_2_studied == 1) |
+           (correct_word_3_studied == 1) |
+           (correct_word_4_studied == 1) |
+           (correct_word_5_studied == 1) |
+           (correct_word_6_studied == 1), 1, 0))
+```
+
+Code whether a target word is recalled in any position in the list
+
+```{r}
+d = d %>%
+  ungroup() %>%
+  group_by(participant_id, block_num, trial_num) %>%
+  mutate(lenient_studied_in_recalled = ifelse(target_word %in% response_word, 1, 0),
+         studied_item_error = ifelse(lenient_studied_in_recalled == 0, 1, 0),
+         studied_order_error = ifelse((lenient_studied_in_recalled == 1) & (correct_strict == 0), 1, 0))
+```
+
+Coding conditions for modeling
+
+```{r,  results = 'hide', message = FALSE}
+d = d %>%
+  mutate(list_condition_num = ifelse(list_condition == 'inanimate', -0.5, 0.5),
+         frame_condition_num = ifelse(frame_condition == 'a', -0.5, 0.5),
+         list_position_num = recode(recall_position, 
+                                    '6' = -0.5, 
+                                    '5' = -0.3, 
+                                    '4' = -0.1, 
+                                    '3' = 0.1, 
+                                    '2' = 0.3, 
+                                    '1' = 0.5),
+         crit_pair_f = as.factor(crit_pair),
+         participant_id_f = as.factor(participant_id)) %>%
+  # Coding list position for model
+  mutate(recall_position_ranged = recall_position / 6)
+```
+
+## Filtering out participants who are not responding
+
+```{r,  results = 'hide', message = FALSE}
+d_mean_part_check = d %>%
+  group_by(participant_id) %>%
+  summarise(m_correct = mean(correct_strict)) %>%
+  ungroup()
+
+bad_mean_responses = d_mean_part_check %>%
+  filter(m_correct < .10)
+```
+
+```{r,results = 'hide', message = FALSE}
+d_blank_response_check = d %>%
+  filter(response_word == "") %>%
+  group_by(participant_id) %>%
+  count() %>%
+  ungroup()
+
+bad_blank_responses = d_blank_response_check %>%
+  filter(n > 275)
+```
+
+## Filter out participants with problematic data
+
+```{r, results = 'hide', message = FALSE}
+d = d %>%
+  filter(!participant_id %in% bad_mean_responses$participant_id) %>%
+  filter(!participant_id %in% bad_blank_responses$participant_id)
+
+length(unique(d$participant_id))
+```
+
+## Coding total item and order propensity
+
+```{r}
+# Overall accuracy across all trials
+d_overall = d %>%
+  ungroup() %>%
+  filter(recall_position %in% c(4, 5, 6)) %>%
+  group_by(list_condition) %>%
+  summarise(sum_correct_strict = sum(correct_strict),
+            total_cells = n(),
+            ratio = sum_correct_strict / total_cells)
+
+# When only looking in case where participants recalled the word in the list
+d_order_propensity = d %>%
+  ungroup() %>%
+  filter(recall_position %in% c(4, 5, 6)) %>%
+  filter(correct_lenient_studied == 1) %>%
+  group_by(list_condition) %>%
+  summarise(sum_correct_strict = sum(correct_strict),
+            sum_correct_lenient = sum(correct_lenient_studied),
+            total_cells = n(),
+            ratio = sum_correct_strict / total_cells)
+```
+
+## Saving
+
+Save dataframe as a .tsv
+
+```{r}
+d = d %>%
+  group_by(participant_id, frame_condition, trial_num) %>%
+  mutate(response_list = list(response_word),
+         response_list = as.character(response_list))
+
+write_tsv(d, path = "DAT_exp1_dataframe.tsv")
+```
+
+
+## Visualization
+
+### Overall recall by condition
+
+```{r}
+library(Rmisc)
+
+d_summary_within = d %>%
+  summarySEwithin(measurevar = "correct_strict",
+                  withinvars = "list_condition",
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_summary_within %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = list_condition, 
+             y = correct_strict,
+             fill = list_condition)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = correct_strict - ci, ymax = correct_strict + ci), 
+                width = 0.1) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "List condition", 
+       y = "Proportion correct", 
+       fill = "List condition") +
+  scale_fill_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+Split by position
+
+```{r}
+# 716 x 600
+d_position_summary_within = d %>%
+  summarySEwithin(measurevar = "correct_strict",
+                  withinvars = c("list_condition", "recall_position"),
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_position_summary_within %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = recall_position, y = correct_strict, color = list_condition, group = list_condition)) +
+  geom_point(size = 1.5) +
+  geom_line(size = 1.5) +
+  geom_errorbar(aes(ymin = correct_strict - ci, ymax = correct_strict + ci), 
+                size = 1.0,
+                width = 0.2) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  labs(x = "List position", 
+       y = "Proportion correct", 
+       color = "List condition") +
+  scale_colour_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+Item memory
+
+```{r}
+d_summary_within = d %>%
+  summarySEwithin(measurevar = "correct_lenient",
+                  withinvars = "list_condition",
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_summary_within %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = list_condition, 
+             y = correct_lenient,
+             fill = list_condition)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = correct_lenient - ci, ymax = correct_lenient + ci), 
+                width = 0.1) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "List condition", 
+       y = "Proportion correct", 
+       fill = "List condition") +
+  scale_fill_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+Split by position
+
+```{r}
+# 716 x 600
+d_position_summary_within = d %>%
+  summarySEwithin(measurevar = "correct_lenient",
+                  withinvars = c("list_condition", "recall_position"),
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_position_summary_within %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = recall_position, y = correct_lenient, color = list_condition, group = list_condition)) +
+  geom_point(size = 1.5) +
+  geom_line(size = 1.5) +
+  geom_errorbar(aes(ymin = correct_lenient - ci, ymax = correct_lenient + ci), 
+                size = 1.0,
+                width = 0.2) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  labs(x = "List position", 
+       y = "Proportion correct", 
+       color = "List condition") +
+  scale_colour_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+Order memory
+
+Only for items recalled correctly in any position
+
+```{r}
+d_summary_within_propensity = d %>%
+  filter(correct_lenient == 1) %>%
+  summarySEwithin(measurevar = "correct_strict",
+                  withinvars = "list_condition",
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_summary_within_propensity %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = list_condition, 
+             y = correct_strict,
+             fill = list_condition)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = correct_strict - ci, ymax = correct_strict + ci), 
+                width = 0.1) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "List condition", 
+       y = "Proportion correct", 
+       fill = "List condition") +
+  scale_fill_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+Split by position
+
+```{r}
+# 716 x 600
+d_position_summary_within = d %>%
+  filter(correct_lenient == 1) %>%
+  summarySEwithin(measurevar = "correct_strict",
+                  withinvars = c("list_condition", "recall_position"),
+                  idvar = "participant_id",
+                  na.rm = FALSE,
+                  conf.interval = .95)
+
+d_position_summary_within %>%
+  mutate(list_condition = str_to_title(list_condition)) %>%
+  ggplot(aes(x = recall_position, y = correct_strict, color = list_condition, group = list_condition)) +
+  geom_point(size = 1.5) +
+  geom_line(size = 1.5) +
+  geom_errorbar(aes(ymin = correct_strict - ci, ymax = correct_strict + ci), 
+                size = 1.0,
+                width = 0.2) +
+  scale_y_continuous(limits = c(0, 1.0),
+                     expand = c(0, 0)) +
+  labs(x = "List position", 
+       y = "Proportion correct", 
+       color = "List condition") +
+  scale_colour_branded(target = "Pistachio", direction = 1) +
+  theme(plot.background = element_rect(fill = 'white', colour = 'white')) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'white'))
+```
+
+And considering frame type
+
+```{r}
+d %>%
+  ggplot(aes(x = recall_position, y = correct_strict, color = list_condition, linetype = frame_condition)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0.0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = "List position", 
+       y = "Estimated match between target and recalled", 
+       color = "Recall condition",
+       title = "Recall")
+```
+
+How do participants shift their responses across positions?
+
+```{r}
+d %>%
+  pivot_longer(cols = c(dist_word_1, dist_word_2, dist_word_3, dist_word_4, dist_word_5, dist_word_6),
+               names_to = "compared_position",
+               names_prefix = "dist_word_",
+               values_to = "dist_position") %>%
+  ggplot(aes(x = recall_position, y = dist_position, color = compared_position)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = "List position",
+       y = "Estimated match between studied word and recalled",
+       color = "Studied word position",
+       title = "Recall") +
+  facet_wrap(~list_condition)
+```
+
+### Does recall change as a function of block and trial?
+
+```{r}
+d %>%
+  ggplot(aes(x = trial_num, y = correct_strict, color = as.factor(block_num))) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  labs(x = 'Trial number',
+       y = 'Estimated match between target and recalled',
+       color = 'Block number',
+       title = 'Recall across the experiment')
+```
+
+```{r}
+d %>%
+  ggplot(aes(x = trial_num, y = correct_strict, color = as.factor(block_num), linetype = list_condition)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  labs(x = 'Trial number',
+       y = 'Estimated match between target and recalled',
+       color = 'Block number',
+       title = 'Recall across the experiment')
+```
+
+Smoothing over trials, we can see that participants are improving across the experiment, though any effect by condition is scarce.
+
+```{r}
+d %>%
+  ggplot(aes(x = trial_num, y = correct_strict, color = list_condition)) +
+  stat_smooth(method = "gam", alpha = 0.75) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  labs(x = "Trial number", 
+       y = "Estimated match between target and recalled", 
+       color = "Recall condition",
+       title = "Recall")
+```
+
+### Item and order errors
+
+Item errors are categorized as a response in which a participant erroneously recalls a word that is not in the list for a trial. In contrast, order errors comprise cases where participants recall a word in the wrong position. Suppose a participant sees the list [dog - cat - tree] and recalls [cat - mouse - tree]. The recalled word "cat" would be an order error, as the word appeared in the studied list and participant recalled it in the incorrect position. The recalled word "mouse" would be an item error, as the word did not appear in the studied list.
+
+Theories in VWM claim that item and errors are dissociable. How do item and order errors pattern in sentence-like lists? Given previous evidence (e.g. Allen, Hitch, & Baddeley, 2018), we would expect item and order errors to be less likely in sentence-like lists compared to non-sentence-like lists.
+
+```{r}
+# Overall, participants are more likely to produce an item error than an order error
+d %>% 
+  group_by(list_condition) %>%
+  summarise(c_order_error = sum(order_error),
+            m_order_error = mean(order_error),
+            se_order_error = parameters::standard_error(order_error),
+            c_item_error = sum(item_error),
+            m_item_error = mean(item_error),
+            se_item_error = parameters::standard_error(item_error))
+
+# Given there is an error...
+d %>% 
+  filter(correct_strict == 0) %>%
+  group_by(list_condition) %>%
+  summarise(c_order_error = sum(order_error),
+            m_order_error = mean(order_error),
+            se_order_error = parameters::standard_error(order_error),
+            c_item_error = sum(item_error),
+            m_item_error = mean(item_error),
+            se_item_error = parameters::standard_error(item_error))
+
+d %>% 
+  group_by(recall_position, list_condition) %>%
+  summarise(m_order_error = mean(order_error),
+            se_order_error = parameters::standard_error(order_error),
+            m_item_error = mean(item_error),
+            se_item_error = parameters::standard_error(item_error))
+```
+
+Now let's visualize which studied words are recalled erroneously.
+
+```{r}
+d %>%
+  ggplot(aes(x = recall_position, y = order_error, color = list_condition)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = 'List position',
+       y = 'Proportion of order errors',
+       color = 'List condition',
+       title = 'Order errors')
+
+d %>%
+  ggplot(aes(x = recall_position, y = item_error, color = list_condition)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = 'List position',
+       y = 'Proportion of item errors',
+       color = 'List condition',
+       title = 'Item errors')
+```
+
+Where do participants shift the words they recall when they make an order error?
+
+```{r}
+d %>%
+  filter(order_error == 1) %>%
+  pivot_longer(cols = c(correct_word_1, correct_word_2, correct_word_3, 
+                        correct_word_4, correct_word_5, correct_word_6),
+               names_to = "compared_position",
+               names_prefix = "correct_word_",
+               values_to = "correct_position") %>%
+  filter(recall_position != compared_position) %>%
+  ggplot(aes(x = recall_position, y = correct_position, color = compared_position)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = "List position",
+       y = "Proportion of correct recall",
+       color = "Studied word position",
+       title = "Order errors") +
+  facet_wrap(~list_condition)
+```
+
+When participants make an item error, do they recall a word that is similar to other items in the list?
+
+```{r}
+d %>%
+  filter(item_error == 1) %>%
+  pivot_longer(cols = c(dist_word_1, dist_word_2, dist_word_3, 
+                        dist_word_4, dist_word_5, dist_word_6),
+               names_to = "compared_position",
+               names_prefix = "dist_word_",
+               values_to = "dist_position") %>%
+  ggplot(aes(x = recall_position, y = dist_position, color = compared_position)) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), limits = c(1, 6)) +
+  labs(x = "List position",
+       y = "Estimated match between studied and recalled",
+       color = "Studied word position",
+       title = "Item errors") +
+  facet_wrap(~list_condition)
+```
+
+The overall proportion of item and order errors has been used as tha past as an argument against activation-based models of VWM.
+
+```{r}
+overall_errors = d %>%
+  filter(recall_position %in% c(4, 5, 6)) %>%
+  group_by(list_condition) %>%
+  summarise(total_item_error = sum(item_error),
+            total_order_error = sum(order_error),
+            total_correct_strict = sum(correct_strict),
+            total_correct_lenient = sum(correct_lenient)) %>%
+  mutate(error_prop = total_order_error / total_item_error,
+         correct_prop = total_correct_strict / total_correct_lenient)
+```
+
+### Propensity to recall items in position
+
+```{r}
+d_summarized %>%
+  ggplot(aes(x = list_condition, y = order_propensity, fill = list_condition)) +
+  stat_summary(geom = 'bar', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = 0.25) +
+  geom_jitter(data = d_summarized, aes(x = list_condition, y = order_propensity, color = list_condition),
+              alpha = 0.25) +
+  scale_y_continuous(limits = c(0, 1.0)) +
+  labs(x = "Sentence-likeness",
+       y = "Order propensity (Strict / Lenient)")
+```
+
+### What about speed?
+
+```{r}
+# Total time per participant
+# Plus 6 minutes for seeing stimuli
+# Plus a minute or 2 for answering demographics questions
+d %>%
+  group_by(participant_id) %>%
+  summarise(total_time = (sum(rt) / 1000) / 60)
+
+d %>%
+  ggplot(aes(x = log(rt), 
+             color = as.factor(participant_id),
+             fill = as.factor(participant_id))) +
+  geom_histogram(bins = 100)
+
+d %>%
+  ggplot(aes(x = trial_num, y = log(rt), color = as.factor(block_num))) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous() +
+  labs(x = 'Trial number',
+       y = 'RT (log)',
+       color = 'Block number',
+       title = 'Reaction time across the experiment')
+
+d %>%
+  ggplot(aes(x = trial_num, y = log(rt), color = as.factor(block_num))) +
+  stat_summary(geom = 'point', alpha = 0.75) +
+  stat_summary(geom = 'line', alpha = 0.75) +
+  stat_summary(geom = 'errorbar', alpha = 0.5, width = .25) +
+  scale_y_continuous() +
+  labs(x = 'Trial number',
+       y = 'RT (log)',
+       color = 'Block number',
+       title = 'Reaction time across the experiment') +
+  facet_wrap(~list_condition)
+```
+
+## Modeling
+
+### Accuracy across all positions
+
+```{r}
+m_strict = glmer(correct_strict ~ 
+                         list_condition_num + 
+                         frame_condition_num + 
+                         list_condition_num:frame_condition_num +
+                         (1 + list_condition_num|crit_pair_f) + 
+                         (1|participant_id_f),
+                       data = d,
+                       family = binomial,
+                       control = glmerControl(optCtrl = list(maxfun = 50000)))
+summary(m_strict)
+Anova(m_strict, type = 3)
+```
+
+While also considering position
+
+```{r}
+m_strict_position = glmer(correct_strict ~
+                            list_condition_num +
+                            frame_condition_num +
+                            list_condition_num:frame_condition_num +
+                            recall_position_ranged +
+                            I(recall_position_ranged ^ 2) +
+                            (1 + list_condition_num + frame_condition_num + list_condition_num:frame_condition_num|crit_pair_f) +
+                            (1 + list_condition_num|participant_id_f),
+                          data = d,
+                          family = binomial,
+                          control = glmerControl(optimizer = 'bobyqa',
+                                                 optCtrl = list(maxfun = 50000)))
+
+summary(m_strict_position)
+Anova(m_strict_position, type = 3)
+```
+
+While considering interaction between position and sentence-likeness
+
+```{r}
+m_strict_position_test = glmer(correct_strict ~
+                            list_condition_num +
+                            frame_condition_num +
+                            list_condition_num:frame_condition_num +
+                            list_position_num +
+                            I(list_position_num ^ 2) +
+                            list_condition_num:list_position_num +
+                            list_condition_num:I(list_position_num ^ 2) +
+                            (1 + list_condition_num + frame_condition_num + list_condition_num:frame_condition_num|crit_pair_f) +
+                            (1 + list_condition_num + list_position_num + I(list_position_num ^ 2)|participant_id_f),
+                          data = d,
+                          family = binomial,
+                          control = glmerControl(optimizer = 'bobyqa',
+                                                 optCtrl = list(maxfun = 50000)))
+
+summary(m_strict_position_test)
+Anova(m_strict_position_test, type = 3)
+```
+
+### Item memory: Whether or not a word was recalled, irrespective of position
+
+This is measuring item memory
+
+```{r}
+m_binary_item = glmer(correct_lenient ~
+                        list_condition_num +
+                        frame_condition_num +
+                        list_condition_num:frame_condition_num +
+                        (1 + list_condition_num + 
+                           frame_condition_num + 
+                           list_condition_num:frame_condition_num|crit_pair_f) +
+                        (1 + list_condition_num|participant_id_f),
+                      data = d,
+                      family = binomial)
+summary(m_binary_item)
+Anova(m_binary_item, type = 3)
+```
+
+While also considering position
+
+```{r}
+m_binary_item_position = glmer(correct_lenient ~
+                                 list_condition_num +
+                                 frame_condition_num +
+                                 list_condition_num:frame_condition_num +
+                                 recall_position_ranged +
+                                 I(recall_position_ranged ^ 2) +
+                                 (1 + list_condition_num + frame_condition_num + list_condition_num:frame_condition_num|crit_pair_f) +
+                                 (1 + list_condition_num|participant_id_f),
+                               data = d,
+                               family = binomial,
+                               control = glmerControl(optimizer = 'bobyqa',
+                                                 optCtrl = list(maxfun = 50000)))
+
+summary(m_binary_item_position)
+Anova(m_binary_item_position, type = 3)
+```
+
+### Order memory: Only words recalled in any position
+
+Only words that were recalled, asking whether or not they were recalled in the correct position
+
+```{r}
+d_any = d %>%
+  filter(correct_lenient == 1)
+
+m_binary_order = glmer(correct_strict ~ 
+                         list_condition_num + 
+                         frame_condition_num + 
+                         list_condition_num:frame_condition_num +
+                         (1 + list_condition_num + frame_condition_num|crit_pair_f) + 
+                         (1 + list_condition_num|participant_id_f),
+                       data = d_any,
+                       family = binomial)
+summary(m_binary_order)
+Anova(m_binary_order, type = 3)
+```
+
+While considering position
+
+```{r}
+m_binary_order_position = glmer(correct_strict ~
+                                  list_condition_num +
+                                  frame_condition_num +
+                                  list_condition_num:frame_condition_num +
+                                  recall_position_ranged +
+                                  I(recall_position_ranged ^ 2) +
+                                  (1 + list_condition_num + frame_condition_num + list_condition_num:frame_condition_num|crit_pair_f) +
+                                  (1 + list_condition_num|participant_id_f),
+                                data = d_any,
+                                family = binomial,
+                                control = glmerControl(optimizer = 'bobyqa',
+                                                 optCtrl = list(maxfun = 50000)))
+
+summary(m_binary_order_position)
+Anova(m_binary_order_position, type = 3)
+```

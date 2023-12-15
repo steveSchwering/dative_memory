@@ -1,0 +1,43 @@
+---
+title: "dative_list_generation"
+author: "Steve Schwering"
+date: "1/12/2021"
+output: html_document
+---
+
+```{r}
+sentences = read_csv('generated_pairs_with_results.csv')
+verbs = read_csv('verblists.csv')
+```
+
+Let's identify the most DO-biased and most PO-biased verbs
+
+```{r}
+verb_do_biases = sentences %>%
+  group_by(verb_id) %>%
+  summarise(m_do_pref = mean(BehavDOpreference),
+            se_do_pref = se(BehavDOpreference)) %>%
+  left_join(verbs, by = 'verb_id')
+```
+
+Identify the most DO-biased sentence for each verb. Filter to exclude sentences with a `something` theme and with a `pronoun` recipient_id.
+
+```{r}
+verb_most_biased = sentences %>%
+  filter(theme_type != 'something' & recipient_id != 'pronoun') %>%
+  group_by(verb_id) %>%
+  top_n(1, BehavDOpreference) %>%
+  left_join(verb_do_biases, by = 'verb_id')
+```
+
+Most of these appear to use the same indirect object (e.g. `the man`, `the woman`). It would probably be good to identify our own indirect objects, but that set is much less constrained than direct objects.
+
+Anyway, now we can extract only the content words. To do this, I am going to identify the set of words that we do NOT want and simply remove them, and then convert the string to a list.
+
+```{r}
+superfluous = c("the", "a")
+
+sentences = sentences %>%
+  mutate(stripped_sentence = str_split(DOsentence, ' '),
+         stripped_sentence = map(stripped_sentence, purrr::discard(., .p = ~stringr::str_detect(.x, superfluous))))
+```

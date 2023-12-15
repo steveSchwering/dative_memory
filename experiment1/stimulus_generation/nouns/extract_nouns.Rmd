@@ -1,0 +1,92 @@
+---
+title: "extract_nouns"
+author: "Steve Schwering"
+date: "2/19/2021"
+output: html_document
+---
+
+Nouns we are considering
+```{r}
+animacy_filename = 'animacy_norms_vanarsdall.tsv'
+
+animacy_nouns = read_tsv(animacy_filename)
+```
+
+Nouns paired with the verbs that need to be excluded
+```{r}
+paired_filename = 'critical_vn.csv'
+
+exclusive_nouns = read_csv(paired_filename)
+```
+
+Norms for all words
+
+Pull out the words that fulfill the following criteria:
+-- Dom_PoS_SUBTLEX == 'Noun'
+-- Percentage_dom_PoS >= .95
+-- In the VanArsdall norms
+-- NOT in the nouns we are already using
+Finally, merge with the VanArsdall norms
+```{r}
+norms_filename = 'brysbaert_norms.txt'
+
+all_norms = read_tsv(norms_filename) %>%
+  filter(Dom_PoS_SUBTLEX == 'Noun',
+         Percentage_dom_PoS >= .95,
+         Word %in% animacy_nouns$word,
+         !Word %in% exclusive_nouns$critical_noun) %>%
+  rename("word" = Word) %>%
+  inner_join(animacy_nouns, by = "word")
+```
+
+The object `all_norms` now contains all the nouns we are considering. We now need to choose a set of animate nouns and a set of inanimate nouns.
+
+```{r}
+num_animate_nouns = nrow(exclusive_nouns) * 2
+num_inanimate_nouns = nrow(exclusive_nouns)
+
+animate_nouns = all_norms %>%
+  mutate(total_animacy = animacy_mental_rating + animacy_physical_rating) %>%
+  arrange(desc(total_animacy)) %>%
+  slice(1:num_animate_nouns)
+
+inanimate_nouns = all_norms %>%
+  mutate(total_animacy = animacy_mental_rating + animacy_physical_rating) %>%
+  arrange(total_animacy) %>%
+  slice(1:num_inanimate_nouns)
+```
+
+There are going to eb differences between these sets of words no matter what, but it's good to know what those might be. The animate nouns are going to be more freqeunt, more contextually diverse, etc.
+```{r}
+describe(animate_nouns)
+hist(animate_nouns$Lg10WF)
+
+describe(inanimate_nouns)
+hist(inanimate_nouns$Lg10WF)
+```
+
+```{r}
+animate_nouns %>%
+  select(c(word, FREQcount, Lg10WF, CDcount, Lg10CD, Dom_PoS_SUBTLEX, Percentage_dom_PoS, 
+           animacy_mental_rating, animacy_physical_rating, total_animacy)) %>%
+  write_csv('animate_nouns.csv')
+
+inanimate_nouns %>%
+  select(c(word, FREQcount, Lg10WF, CDcount, Lg10CD, Dom_PoS_SUBTLEX, Percentage_dom_PoS, 
+           animacy_mental_rating, animacy_physical_rating, total_animacy)) %>%
+  write_csv('inanimate_nouns.csv')
+```
+
+Select practice nouns for practice lists
+```{r}
+set.seed(999)
+practice_nouns = all_norms %>%
+  filter(!word %in% animate_nouns$word,
+         !word %in% inanimate_nouns$word) %>%
+  sample_n(6 * 5)
+
+practice_nouns %>%
+  select(c(word, FREQcount, Lg10WF, CDcount, Lg10CD, Dom_PoS_SUBTLEX, Percentage_dom_PoS, 
+           animacy_mental_rating, animacy_physical_rating)) %>%
+  write_csv('practice_nouns.csv')
+```

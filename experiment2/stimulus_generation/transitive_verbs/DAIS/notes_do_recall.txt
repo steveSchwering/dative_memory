@@ -1,0 +1,38 @@
+In this experiment, we will be looking at how grammatical cues bias recall, and how lexical representations moderate syntactic support for VWM. Double object (DO), dative-like lists will contain either verbs that typically occur in DO lists or verbs that typically do not occur in DO lists. Further, there will be a control condition comprising filler lists that substitute verbs in DO lists with other verbs. If lexical information moderates the strength of syntactic support for VWM, then partcipants should recall more words in sentences with a strong DO preference and good DO verb than sentences with a strong DO preference but a weak DO verb.
+
+1. Identification of dative sentences
+    a. Verbs will be drawn from the DAIS norms Hawkins et al. (2020). DAIS provides DO biases for a set of 200 verbs, each in 25 different sentences.
+        i. Note, the verbs in Hawkins et al. (2020) are themselves pulled from Levin (1993), which could be a source of more dative verbs.
+    b. The distributional biases of verbs are being confirmed by Cassie in a corpus analysis of COCA
+2. Putting target verbs in dative-like lists
+    a. Lists can be generated from the sentences in the DAIS dataset by stripping non-content words. For example, a sentence like `Bob promised a man the vacation` could become `Bob - promise - man - vacation`. We could lengthen some of these sentences by adding adjectives in front of nouns.
+        i. Change animate nouns to generics (e.g. Bob -> accountant)?
+    b. Alternatively, we can generate the lists from the verbs ourselves, though we risk generating a DO dative that is not a good DO dative. There is a large amount of variability in the DAIS dataset. Some heavily PO-biased verbs occur in some contexts that make good DO dative sentences. While interesting from the perspective of language research, it is potentially also a danger for our manipulation. If verbs that are typically fitting in PO datives also fit well in DO datives, then would changing the verb in a good DO to a verb that has a strong PO-preference really change the goodness of the sentence?
+    b. Question: How do we manipulate verb biases without also changing the meaningfulness of the sentences? We would not want to substitute a verb in sentence with a strong DO bias and see memory change merely as a function of the sentence-like list no longer having any meaningfule coherence. To swap out the verb, we would need to group DO-biased verbs and PO-biased verbs that mean similar things. We could group words based on what they are expressing, like verbs about communication (said; promised) or transference of possession (donated; sold).
+        i. Pairs of DO-biased verbs and PO-biased verbs
+            + All pairs meaningfule
+            - Hard to generate pairs for all verbs
+        ii. Pools of meaningfully-related verbs
+            + Easy to generate pools
+            - Subtle meanings missed
+
+
+Example list
+    DO-biased verb:
+        told (.58 DO)
+    PO-biased verb
+        mentioned (.09 DO)
+    DO-biased verb in DO list:
+        The accountant told the brave hero big news.
+        accountant - told - brave - hero - big - news
+    PO-biased verb in DO list:
+        The accountant mentioned the brave hero big news.
+        accountant - mentioned - brave - hero - big - news
+    Control:
+        The accountant dog the brave hero big news.
+        accountant - dog - brave - hero - big - news
+
+References
+    Levin, B. (1993). English verb classes and alternations: A preliminary investigation. University of Chicago press.
+
+    Hawkins, R., Yamakoshi, T., Griffiths, T. L., & Goldberg, A. (2020, November). Investigating Representations of Verb Bias in Neural Language Models. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP) (pp. 4653-4663).

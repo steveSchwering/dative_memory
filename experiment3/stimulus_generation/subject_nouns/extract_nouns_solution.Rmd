@@ -1,0 +1,331 @@
+---
+title: "extract_nouns"
+author: "Steve Schwering"
+date: "2/19/2021"
+output: html_document
+---
+
+```{r}
+library(Rtsne)
+library(tidyverse)
+```
+
+Nouns we are considering
+
+```{r}
+animacy_filename = 'animacy_norms_vanarsdall.tsv'
+
+animacy_nouns = read_tsv(animacy_filename, col_names = TRUE)
+
+rm(animacy_filename)
+```
+
+Norms for all words
+
+Pull out the words that fulfill the following criteria:
+-- Dom_PoS_SUBTLEX == 'Noun'
+-- Percentage_dom_PoS >= .95
+-- In the VanArsdall norms
+Merge with the VanArsdall norms
+Finally, calculate the length of the words
+
+```{r}
+norms_filename = 'brysbaert_norms.txt'
+
+all_norms = read_tsv(norms_filename) %>%
+  filter(Dom_PoS_SUBTLEX == 'Noun',
+         Percentage_dom_PoS >= .95,
+         Word %in% animacy_nouns$word) %>%
+  rename("word" = Word) %>%
+  inner_join(animacy_nouns, by = "word") %>%
+  mutate(length = str_length(word))
+
+rm(norms_filename)
+```
+
+The object `all_norms` now contains all the nouns we are considering. We now need to choose a set of animate nouns and a set of inanimate nouns.
+
+Next, we will read in the semantic embeddings associated with the nouns. These were extracted from a set of spacy embeddings.
+
+```{r}
+semantic_features_filename = 'all_noun_spacy_embeddings.tsv'
+
+semantic_features = read_tsv(semantic_features_filename)
+
+rm(semantics_features_filename)
+```
+
+To select the pairs of animate and inanimate nouns, we want to first start with a big pool of possible nouns, and then pare down from there. We are going to select the top 300 animate nouns and top 300 inanimate nouns, and then pair the nouns together. First, we want to select those 300 nouns from each category.
+
+```{r}
+num_animate_nouns = 300
+num_inanimate_nouns = 500
+
+# Extract candidate animate nouns
+animate_nouns = all_norms %>%
+  mutate(total_animacy = animacy_mental_rating + animacy_physical_rating) %>%
+  arrange(desc(total_animacy)) %>%
+  slice(1:num_animate_nouns) %>%
+  mutate(animacy = 'animate')
+
+# Extract candidate inanimate nouns
+inanimate_nouns = all_norms %>%
+  mutate(total_animacy = animacy_mental_rating + animacy_physical_rating) %>%
+  arrange(total_animacy) %>%
+  slice(1:num_inanimate_nouns) %>%
+  mutate(animacy = 'inanimate')
+
+all_nouns = animate_nouns %>%
+  bind_rows(inanimate_nouns)
+
+all_nouns_semantics = all_nouns %>%
+  left_join(semantic_features, by = "word") %>%
+  select(word, animacy, starts_with("embedding"))
+
+rm(all_norms); rm(animacy_nouns); rm(semantic_features)
+```
+
+Next, we want to configure out the dimensions along which we will compare the nouns. We have the following dimensions: character length, frequency, and contextal diversity.
+
+Let's visualize the distribution of these values right quick, along with the animacy of the two categories. Note, with this plot, if you change the number of nouns required in each category, you start getting overlap with around 400 nouns in the animate and inanimate categories. 300 potential animate and inanimate nouns seems about right to keep the groups separated.
+
+```{r}
+all_nouns %>%
+  ggplot(aes(x = total_animacy, color = animacy, fill = animacy)) +
+  geom_histogram(aes(y = ..density..), position = "dodge", bins = 30, alpha = 0.75) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of total animacy")
+
+all_nouns %>%
+  ggplot(aes(x = length, color = animacy, fill = animacy)) +
+  geom_histogram(aes(y = ..density..), position = "dodge", bins = 30, alpha = 0.75) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of length")
+
+all_nouns %>%
+  ggplot(aes(x = Lg10WF, color = animacy, fill = animacy)) +
+  geom_histogram(aes(y = ..density..), position = "dodge", bins = 30, alpha = 0.75) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of word frequency")
+
+all_nouns %>%
+  ggplot(aes(x = Lg10CD, color = animacy, fill = animacy)) +
+  geom_histogram(aes(y = ..density..), position = "dodge", bins = 30, alpha = 0.75) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of contextual diversity")
+```
+
+Furthermore, we also want to ensure that we are pairing words that are semantically similar. To get a sense of the semantic space, let's do a quick dimension reduction on our semantic space and plot it.
+
+```{r}
+library(Rtsne)
+library(plotly)
+library(ggplot2)
+
+# Create the tsne object
+just_embeddings = all_nouns_semantics %>%
+  select(starts_with("embedding")) %>%
+  Rtsne()
+
+# Pull out the embeddings
+just_embeddings = data.frame(x = just_embeddings$Y[,1],
+                             y = just_embeddings$Y[,2],
+                             word = all_nouns_semantics$word,
+                             animacy = all_nouns_semantics$animacy)
+
+# Plot
+plot_ly(data = just_embeddings, 
+        x = ~x, 
+        y = ~y, 
+        color = ~animacy, 
+        text = ~word)
+
+rm(just_embeddings)
+```
+
+But how do we select the inanimate nouns that are "most similar" to our target animate nouns?
+
+To do this we are going to calculate similarity for three of the dimensions: length, frequency, and contextual diversity, and then calculate the similarity for the semantics of the words.
+
+## Euclidean distance of length, frequency, and contextual diversity
+
+Let's think about what the "most similar" noun actually means. We have multiple dimensions along which we are comparing the nouns, so we need some way to express the similarity in a multi-dimensional space. Euclidean distance is one way to do this! Euclidean distance tells us how far apart points are in a multidimensional space, and we can think of more similar words as being closer together.
+
+So that we do not weigh one metric more than others, we are going to z-score our dimensions before calculating the euclidean distance between words. z-scoring ensures that the dimensions are on the same scale.
+
+```{r}
+z_all_nouns = all_nouns %>%
+  mutate(z_length = (length - mean(length)) / sd(length),
+         z_Lg10WF = (Lg10WF - mean(Lg10WF)) / sd(Lg10WF),
+         z_Lg10CD = (Lg10CD - mean(Lg10CD)) / sd(Lg10CD)) %>%
+  select(c(word, animacy, total_animacy, length, z_length, Lg10WF, z_Lg10WF, Lg10CD, z_Lg10CD))
+```
+
+Now, we want to calculate the Euclidean distance. To do this, we want to use the dist() function.
+
+Running the following command will tell us some information about how the dist() function works. As we can see, the default for the "method" variable is "euclidean", meaning that the function calculates Euclidean distance.
+
+```{r}
+?dist
+```
+
+This link is helpful for thinking how to compare all rows of the two dataframes:
+https://stackoverflow.com/questions/64269505/euclidean-distances-between-rows-of-two-data-frames-in-r
+
+```{r}
+animate_nouns_dist = z_all_nouns %>%
+  filter(animacy == 'animate') %>%
+  select(c(z_length, z_Lg10WF, z_Lg10CD))
+
+inanimate_nouns_dist = z_all_nouns %>%
+  filter(animacy == 'inanimate') %>%
+  select(c(z_length, z_Lg10WF, z_Lg10CD))
+
+distances = outer(
+  1:nrow(animate_nouns_dist), # Iterates through all rows of animate nouns
+  1:nrow(inanimate_nouns_dist), # Iterates through all rows of inanimate nouns
+  # Finds the distance for each combination of animate/inanimate nouns
+  FUN = Vectorize(function(x, y) dist(rbind(animate_nouns_dist[x,], inanimate_nouns_dist[y,])))
+)
+
+rm(animate_nouns_dist); rm(inanimate_nouns_dist); rm(z_all_nouns)
+```
+
+This generates a 300 (animate nouns) x 300 (inanimate nouns) matrix. Each element of the matrix corresponds to a distance score for an animate noun and an inanimate noun. What we need to do is now identify which element refers to which combination of animate noun and inanimate noun. We can do this by labeling each column with a inanimate noun and each row with an animate noun and then changing the shape of the matrix.
+
+Check out the code of the `pivot_longer()` function, which will be useful for getting the data into the correct shape. Ultimately, we get a dataframe with 90000 rows and 3 variables: the name of the animate noun, the name of the inanimate noun, and the distance between those two nouns.
+
+```{r}
+# Add names to columns
+colnames(distances) = inanimate_nouns$word
+
+# Reshape the dataframe
+distances_long = distances %>%
+  as_tibble() %>%
+  add_column(animate_noun = animate_nouns$word) %>%
+  pivot_longer(cols = -c(animate_noun),
+               names_to = 'inanimate_noun',
+               values_to = 'distance')
+
+rm(distances)
+```
+
+Let's take a look at the distances for the pairs
+
+```{r}
+distances_long %>%
+  ggplot(aes(x = distance)) +
+  geom_histogram()
+```
+
+## Semantic similarity between nouns
+
+We also want to figure out which nouns are most semantically similar. To do this, we can calculat similarity score between our animate nouns and inanimate nouns
+
+```{r}
+library(lsa)
+
+animate_nouns_sem_dist = all_nouns_semantics %>%
+  filter(animacy == 'animate') %>%
+  select(starts_with("embedding"))
+
+inanimate_nouns_sem_dist = all_nouns_semantics %>%
+  filter(animacy == 'inanimate') %>%
+  select(starts_with("embedding"))
+
+sem_distances = outer(
+  1:nrow(animate_nouns_sem_dist), # Iterates through all rows of animate nouns
+  1:nrow(inanimate_nouns_sem_dist), # Iterates through all rows of inanimate nouns
+  # Finds the cosine similarity for each combination of animate/inanimate nouns
+  FUN = Vectorize(function(x, y) cosine(x = as.vector(as.matrix(animate_nouns_sem_dist)[x,]),
+                                        y = as.vector(as.matrix(inanimate_nouns_sem_dist)[y,])))
+)
+
+rm(animate_nouns_sem_dist); rm(inanimate_nouns_sem_dist)
+```
+
+```{r}
+# Add names to columns
+colnames(sem_distances) = inanimate_nouns$word
+
+# Reshape the dataframe
+sem_distances_long = sem_distances %>%
+  as_tibble() %>%
+  add_column(animate_noun = animate_nouns$word) %>%
+  pivot_longer(cols = -c(animate_noun),
+               names_to = 'inanimate_noun',
+               values_to = 'cos_sim') %>%
+  mutate(cos_diff = 1 - cos_sim)
+```
+
+Let's take a look at the semantic similarity for the pairs
+
+```{r}
+sem_distances_long %>%
+  ggplot(aes(x = cos_diff)) +
+  geom_histogram()
+```
+
+## Combining these two metrics together using weighted mean
+
+Now we have two dimensions. The first is the Euclidean distance of between the length, frequency, and contextual diversity of each animate noun/inanimate noun pair. The second is the Euclidean distance between the semantic embeddings of each animate noun/inanimate noun pair. We will take the geometric mean of the two distances to get an average distance. Then, to find the closest neighbor for each animate noun, we will select the inanimate noun with the smallest distance.
+
+```{r}
+combined_distances = distances_long %>%
+  left_join(sem_distances_long, by = c("animate_noun", "inanimate_noun")) %>%
+  rowwise() %>%
+  mutate(geom_mean_dist = geometric.mean(c(distance, cos_diff)))
+```
+
+### Geometric mean
+
+Now, we want to pull out the most similar word, so we will group by the animate noun and retain the row with the smallest `geom_mean_dist`.
+
+```{r}
+neighbors = combined_distances %>%
+  group_by(animate_noun) %>%
+  arrange(geom_mean_dist) %>%
+  slice(1:5)
+
+pairs = neighbors %>%
+  slice(1) %>%
+  ungroup() %>%
+  group_by(inanimate_noun) %>%
+  arrange(geom_mean_dist) %>%
+  slice(1) %>%
+  ungroup() %>%
+  arrange(geom_mean_dist) %>%
+  slice(1:52)
+```
+
+This doesn't seem to return a very good solution.
+
+### Bottom n distance and smallest cosine difference
+
+What if we take a different approach, by selecting the top 10 closest matches on the dimensions of length, frequency, and contextual diversity, and then choose the most semantically related word from there?
+
+### Bottom n distance and smallest cosine difference
+
+What if we take a different approach, by selecting the top 10 closest matches on the dimensions of length, frequency, and contextual diversity, and then choose the most semantically related word from there?
+
+This means that, for each animate noun, we will then have a single paired inanimate noun that is roughly in the right ballpark
+
+```{r}
+neighbors = combined_distances %>%
+  group_by(animate_noun) %>%
+  arrange(distance) %>%
+  slice(1:10) %>%
+  arrange(cos_diff) %>%
+  slice(1) %>%
+  ungroup() %>%
+  group_by(inanimate_noun) %>%
+  arrange(cos_diff) %>%
+  slice(1) %>%
+  ungroup() %>%
+  arrange(cos_diff) %>%
+  slice(1:52)
+```
+
+```{r}
+write_csv(neighbors, "paired_nouns.csv")
+```
